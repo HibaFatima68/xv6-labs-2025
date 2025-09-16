@@ -1,3 +1,4 @@
+
 #include "kernel/types.h"
 #include "user/user.h"
 #include "kernel/fcntl.h"
@@ -57,9 +58,50 @@ main(int argc, char *argv[])
   exit(0);
 }
 
+
+  // Your code here.
 void
 memdump(char *fmt, char *data)
 {
-  // Your code here.
-
+  for (int i = 0; fmt[i] != '\0'; i++) {
+    char f = fmt[i];
+    switch (f) {
+    case 'i': { // 4-byte int
+      int val = *(int *)data;
+      printf("%d\n", val);
+      data += 4;
+      break;
+    }
+    case 'p': { // 8-byte pointer/integer in hex
+      uint64 val = *(uint64 *)data;
+      printf("%lx\n", val); // <<< note %lx
+      data += 8;
+      break;
+    }
+    case 'h': { // 2-byte short
+      short val = *(short *)data;
+      printf("%d\n", val);
+      data += 2;
+      break;
+    }
+    case 'c': { // single char
+      uchar val = *(uchar *)data;
+      printf("%c\n", val);
+      data += 1;
+      break;
+    }
+    case 's': { // next 8 bytes = pointer to string
+      char *ptr = *(char **)data;  // 64-bit pointer
+      printf("%s\n", ptr);
+      data += 8;
+      break;
+    }
+    case 'S': { // remaining data is a string
+      printf("%s\n", data);
+      return;
+    }
+    default:
+      break;
+    }
+  }
 }
