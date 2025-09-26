@@ -1,7 +1,11 @@
 // Shell.
+// Minimal change: suppress "$ " prompt when shell input is from a file
+// (i.e., when stdin is a regular file). This keeps interactive behavior
+// unchanged for the console/tty.
 
 #include "kernel/types.h"
 #include "user/user.h"
+#include "kernel/stat.h"    // <<-- ADDED: need struct stat and fstat
 #include "kernel/fcntl.h"
 
 // Parsed command representation
@@ -53,6 +57,13 @@ int fork1(void);  // Fork but panics on failure.
 void panic(char*);
 struct cmd *parsecmd(char*);
 void runcmd(struct cmd*) __attribute__((noreturn));
+
+/*
+ * Modified getcmd signature: accept 'interactive' flag.
+ * If interactive==1 -> print prompt "$ " like original behavior.
+ * If interactive==0 -> do not print prompt (used when reading from a file).
+ */
+int getcmd(char *buf, int nbuf, int interactive);
 
 // Execute cmd.  Never returns.
 void
@@ -131,10 +142,16 @@ runcmd(struct cmd *cmd)
   exit(0);
 }
 
+/*
+ * getcmd: reads a line into buf (max nbuf).
+ * If interactive is true, prints "$ " prompt first.
+ * Returns -1 on EOF, 0 otherwise.
+ */
 int
-getcmd(char *buf, int nbuf)
+getcmd(char *buf, int nbuf, int interactive)
 {
-  write(2, "$ ", 2);
+  if(interactive)
+    write(2, "$ ", 2);
   memset(buf, 0, nbuf);
   gets(buf, nbuf);
   if(buf[0] == 0) // EOF
@@ -147,6 +164,21 @@ main(void)
 {
   static char buf[100];
   int fd;
+  int interactive = 1;    // assume interactive; detect below
+  struct stat st;
+
+  // Determine whether stdin(0) is a regular file (i.e., shell reading from a script/file).
+  // If stdin is a regular file (st.type == T_FILE), treat as non-interactive and
+  // suppress the prompt.
+  if(fstat(0, &st) >= 0){
+    if(st.type == T_FILE)
+      interactive = 0;
+    else
+      interactive = 1;
+  } else {
+    // if fstat fails for some reason, keep interactive=1 (safe default)
+    interactive = 1;
+  }
 
   // Ensure that three file descriptors are open.
   while((fd = open("console", O_RDWR)) >= 0){
@@ -157,7 +189,7 @@ main(void)
   }
 
   // Read and run input commands.
-  while(getcmd(buf, sizeof(buf)) >= 0){
+  while(getcmd(buf, sizeof(buf), interactive) >= 0){
     char *cmd = buf;
     while (*cmd == ' ' || *cmd == '\t')
       cmd++;

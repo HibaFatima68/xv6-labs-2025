@@ -1,10 +1,43 @@
-
 #include "types.h"
 #include "stat.h"
 #include "user.h"
 #include "fcntl.h"
 #include "fs.h"
 #include "param.h"
+
+// Regex matching code copied from grep.c but renamed
+int fmatchhere(char *re, char *text);
+
+int fmatchstar(int c, char *re, char *text) {
+  do {
+    if (fmatchhere(re, text))
+      return 1;
+  } while (*text != '\0' && (*text++ == c || c == '.'));
+  return 0;
+}
+
+int fmatchhere(char *re, char *text) {
+  if (re[0] == '\0')
+    return 1;
+  if (re[1] == '*')
+    return fmatchstar(re[0], re+2, text);
+  if (re[0] == '$' && re[1] == '\0')
+    return *text == '\0';
+  if (*text != '\0' && (re[0] == '.' || re[0] == *text))
+    return fmatchhere(re+1, text+1);
+  return 0;
+}
+
+int fmatch(char *re, char *text) {
+  if (re[0] == '^')
+    return fmatchhere(re+1, text);
+  do {
+    if (fmatchhere(re, text))
+      return 1;
+  } while (*text++ != '\0');
+  return 0;
+}
+
 void find(char *path,char *target,char **exec_argv){
 char buf[512],*p;
 int fd;
@@ -24,7 +57,8 @@ case T_FILE:
 p=path;
 while(*p)p++;
 while(p>path&&*(p-1)!='/')p--;
-if(strcmp(p,target)==0){
+
+if(fmatch(target, p)){
 if(exec_argv){
 int pid=fork();
 if(pid<0){

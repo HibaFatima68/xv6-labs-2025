@@ -172,6 +172,7 @@ mkfs/mkfs: mkfs/mkfs.c $K/fs.h $K/param.h
 # Prevent deletion of intermediate files, e.g. cat.o, after first build, so
 # that disk image changes after first build are persistent until clean.  More
 # details:
+
 # http://www.gnu.org/software/make/manual/html_node/Chained-Rules.html
 .PRECIOUS: %.o
 
@@ -183,6 +184,7 @@ UPROGS=\
         $U/_sixfive\
 	$U/_find\
 	$U/_grep\
+	$U/_uptime\
 	$U/_init\
 	$U/_kill\
 	$U/_ln\
@@ -399,3 +401,4 @@ check-qemu-version:
 		echo "ERROR: Need qemu version >= $(MIN_QEMU_VERSION)"; \
 		exit 1; \
 	fi
+
