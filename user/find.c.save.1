@@ -1,0 +1,159 @@
+-fno-builtin-memmove -fno-builtin-memcmp -fno-builtin-log -fno-builtin-bzero -fno-builtin-strchr -fno-builtin-exit -fno-builtin-malloc -fno-builtin-putc -fno-builtin-free -fno-builtin-memcpy -Wno-main -fno-builtin-printf -fno-builtin-fprintf -fno-builtin-vprintf -I. -fno-stack-protector -fno-pie -no-pie   -c -o user/find.o user/find.c
+user/find.c:40:1: error: redefinition of ‘match’
+   40 | match(char *re, char *text)
+      | ^~~~~
+user/find.c:17:1: note: previous definition of ‘match’ with type ‘int(char *, char *)’
+   17 | match(char *re, char *text)
+      | ^~~~~
+user/find.c:52:5: error: redefinition of ‘matchhere’
+   52 | int matchhere(char *re, char *text)
+      |     ^~~~~~~~~
+user/find.c:29:5: note: previous definition of ‘matchhere’ with type ‘int(char *, char *)’
+   29 | int matchhere(char *re, char *text)
+      |     ^~~~~~~~~
+user/find.c: In function ‘matchhere’:
+user/find.c:56:1: error: control reaches end of non-void function [-Werror=return-type]
+   56 | }
+      | ^
+cc1: all warnings being treated as errors
+make: *** [<builtin>: user/find.o] Error 1
+p@Hibss:/xv6-labs-2025$#include "fcntl.h"
+#include "fs.h"
+#include "param.h"
+
+// Regexp matcher from Kernighan & Pike,
+// The Practice of Programming, Chapter 9, or
+// https://www.cs.princeton.edu/courses/archive/spr09/cos333/beautiful.html
+
+int matchhere(char*, char*);
+int matchstar(int, char*, char*);
+
+int
+match(char *re, char *text)
+{
+  if(re[0] == '^')
+    return matchhere(re+1, text);
+  do{  // must look at empty string
+    if(matchhere(re, text))
+      return 1;
+  }while(*text++ != '\0');
+  return 0;
+}
+
+// matchhere: search for re at beginning of text
+int matchhere(char *re, char *text)
+{
+  if(re[0] == '\0')
+    return 1;} // Regexp matcher from Kernighan & Pike,
+// The Practice of Programming, Chapter 9, or
+// https://www.cs.princeton.edu/courses/archive/spr09/cos333/beautiful.html
+
+int matchhere(char*, char*);
+int matchstar(int, char*, char*);
+
+int
+match(char *re, char *text)
+{
+  if(re[0] == '^')
+    return matchhere(re+1, text);
+  do{  // must look at empty string
+    if(matchhere(re, text))
+      return 1;
+  }while(*text++ != '\0');
+  return 0;
+}
+
+// matchhere: search for re at beginning of text
+int matchhere(char *re, char *text)
+{
+  if(re[0] == '\0')
+    return 1;
+}
+
+void find(char *path,char *target,char **exec_argv){
+char buf[512],*p;
+int fd;
+struct dirent 
+de;
+struct stat st;
+if((fd=open(path,0))<0){
+printf("find: cannot open %s\n",path);
+return;
+}
+if(fstat(fd,&st)<0){
+printf("find: cannot stat %s\n",path);
+close(fd);
+return;
+}
+switch(st.type){
+case T_FILE:
+p=path;
+while(*p)p++;
+while(p>path && *(p-1)!='/')p--;
+
+if(match(target, p)){
+
+if(exec_argv){
+int pid=fork();
+if(pid<0){
+printf("find: fork failed\n");
+}else if(pid==0){
+char *argv[MAXARG];
+int i=0;
+while(exec_argv[i]!=0){
+argv[i]=exec_argv[i];
+i++;
+}
+argv[i++]=path;
+argv[i]=0;
+exec(argv[0],argv);
+printf("find: exec failed\n");
+exit(1);
+}else{
+int wstatus;
+wait(&wstatus);
+}
+}else{
+printf("%s\n",path);
+}
+}
+break;
+case T_DIR:
+if(strlen(path)+1+DIRSIZ+1>sizeof(buf)){
+printf("find: path too long\n");
+break;
+}
+strcpy(buf,path);
+p=buf+strlen(buf);
+*p++='/';
+while(read(fd,&de,sizeof(de))==sizeof(de)){
+if(de.inum==0)continue;
+if(strcmp(de.name,".")==0||strcmp(de.name,"..")==0)continue;
+int i;
+for(i=0;i<DIRSIZ&&de.name[i];i++)p[i]=de.name[i];
+p[i]=0;
+find(buf,target,exec_argv);
+}
+break;
+}
+close(fd);
+}
+int main(int argc,char *argv[]){
+if(argc<3){
+printf("Usage: find path name [-exec cmd args...]\n");
+exit(1);
+}
+char **exec_argv=0;
+for(int i=3;i<argc;i++){
+if(strcmp(argv[i],"-exec")==0){
+if(i+1>=argc){
+printf("Usage: find path name [-exec cmd args...]\n");
+exit(1);
+}
+exec_argv=&argv[i+1];
+break;
+}
+}
+find(argv[1],argv[2],exec_argv);
+exit(0);
+}
