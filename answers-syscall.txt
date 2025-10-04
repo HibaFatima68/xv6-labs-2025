@@ -1,0 +1,9 @@
+1. Function that called syscall: usertrap()
+2. Value of p->trapframe->a7: 0xf( value represents SYS_open)
+3. Previous CPU mode: 0x200000022 → user mode
+4. Faulting instruction: lw a3,zero(0) #0x0
+5. Register corresponding to num: a3
+6. Why kernel crashes: accessing address 0 which is not mapped in kernel memory.
+7. Process name at crash: init
+8. PID at crash: 1
+
