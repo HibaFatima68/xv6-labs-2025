@@ -135,33 +135,27 @@ syscall(void)
 {
 int num;
 struct proc *p = myproc();
-
 num = p->trapframe->a7;
-
-// Reject syscall if masked
 if (p->mask & (1 << num)) {
-// Only allow open/exec if it path matches allowed_path
-if ((num == SYS_open || num == SYS_exec) &&
-strcmp(p->allowed_path, "-") != 0) {
+if ((num == SYS_open || num == SYS_exec) && strcmp(p->allowed_path, "-") != 0) {
 char path[MAXPATH];
 if (copyinstr(p->pagetable, path, (uint64)p->trapframe->a0, sizeof(path)) == 0) {
 if (strcmp(path, p->allowed_path) == 0) {
-// if allowed continue
 goto call_syscall;
 }
 }
-// or reject
 p->trapframe->a0 = -1;
 return;
 }
-
+p->trapframe->a0 = -1;
+return;
+}
 call_syscall:
 if (num >= 0 && num < NELEM(syscalls) && syscalls[num])
 p->trapframe->a0 = syscalls[num]();
 else {
-printf("%d %s: unknown sys call %d\n",
-p->pid, p->name, num);
+printf("%d %s: unknown sys call %d\n", p->pid, p->name, num);
 p->trapframe->a0 = -1;
- }
+}
 }
 
