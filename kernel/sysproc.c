@@ -6,7 +6,7 @@
 #include "spinlock.h"
 #include "proc.h"
 #include "vm.h"
-
+#include "syscall.h"
 uint64
 sys_exit(void)
 {
@@ -105,3 +105,21 @@ sys_uptime(void)
   release(&tickslock);
   return xticks;
 }
+
+
+uint64
+sys_interpose(void)
+{
+    int mask;
+    char path[MAXPATH];
+
+    argint(0, &mask);
+    argstr(1, path, MAXPATH);
+
+    struct proc *p = myproc();
+    p->mask = mask;
+    safestrcpy(p->allowed_path, path, MAXPATH);
+
+    return 0;
+}
+

@@ -286,6 +286,9 @@ kfork(void)
   np->cwd = idup(p->cwd);
 
   safestrcpy(np->name, p->name, sizeof(p->name));
+  // inherit sandbox restrictions
+  np->mask = p->mask;
+  safestrcpy(np->allowed_path, p->allowed_path, sizeof(np->allowed_path));
 
   pid = np->pid;
 
@@ -685,3 +688,5 @@ procdump(void)
     printf("\n");
   }
 }
+
+
