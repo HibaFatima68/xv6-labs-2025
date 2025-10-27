@@ -1,0 +1,25 @@
+Each line shows how a virtual address maps to a physical address  and what permissions "perm" are allowed.
+
+va 0x0 – 0x4000: These are the process’s code and data pages.
+They’re mapped to physical memory (pa values) with read, write, execute and user access permissions (perm 0x5B, 0x17)
+
+va 0x5000 – 0x9000: These are unmapped pages (pte 0x0), meaning no physical memory is linked likely unused or freespace.
+
+va 0xFFFFE000: This is the trapframe page, used when switching between user and kernel mode.
+It has readwrite permissions (perm 0xC7).
+
+va 0xFFFFF000: This is the trampoline page, which runs the code that enters or exits the kernel.
+It has readexecute permissions (perm 0x4B).
+
+Each mapped page connects a virtual page in the process’s memory to its physical location in RAM, defining how user programs can safely access or execute them.
+
+
+
+//ANSWER FOR PART B (SPEED UP SYSTEM CALLS)
+
+System calls like getpid() and uptime() could be faster using this shared page, as processes can directly read values like PID or ticks without trapping into the kernel, reducing context switch overhead.
+//ANSWER FOR PART C (PRINT A PAGE TABLE)
+
+acc to the output vmprint prints the pagetable tree and each leaf PTE maps a virtual page (code, data, stack, 
+trapframe, trampoline) to a physical page. Indentation shows pagetable depth. 
+PTE hex values encode PA and permissions (read/write/execute/user).
