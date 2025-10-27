@@ -7,6 +7,8 @@
 #include "spinlock.h"
 #include "proc.h"
 #include "fs.h"
+extern void *superalloc(void);
+extern void superfree(void *k);
 
 /*
  * the kernel's page table.
@@ -17,7 +19,6 @@ extern char etext[];  // kernel.ld sets this to end of kernel code.
 
 extern char trampoline[]; // trampoline.S
 
-// Make a direct-map page table for the kernel.
 pagetable_t
 kvmmake(void)
 {
@@ -35,29 +36,33 @@ kvmmake(void)
 #ifdef LAB_NET
   // PCI-E ECAM (configuration space), for pci.c
   kvmmap(kpgtbl, 0x30000000L, 0x30000000L, 0x10000000, PTE_R | PTE_W);
-
   // pci.c maps the e1000's registers here.
   kvmmap(kpgtbl, 0x40000000L, 0x40000000L, 0x20000, PTE_R | PTE_W);
-#endif  
+#endif
 
   // PLIC
   kvmmap(kpgtbl, PLIC, PLIC, 0x4000000, PTE_R | PTE_W);
 
   // map kernel text executable and read-only.
-  kvmmap(kpgtbl, KERNBASE, KERNBASE, (uint64)etext-KERNBASE, PTE_R | PTE_X);
+  kvmmap(kpgtbl, KERNBASE, KERNBASE, (uint64)etext - KERNBASE, PTE_R | PTE_X);
 
   // map kernel data and the physical RAM we'll make use of.
-  kvmmap(kpgtbl, (uint64)etext, (uint64)etext, PHYSTOP-(uint64)etext, PTE_R | PTE_W);
+  kvmmap(kpgtbl, (uint64)etext, (uint64)etext, PHYSTOP - (uint64)etext, PTE_R | PTE_W);
 
   // map the trampoline for trap entry/exit to
   // the highest virtual address in the kernel.
   kvmmap(kpgtbl, TRAMPOLINE, (uint64)trampoline, PGSIZE, PTE_R | PTE_X);
 
+  // map the trapframe page just below the trampoline.
+//  kvmmap(kpgtbl, TRAPFRAME, (uint64)(TRAPFRAME - PGSIZE), PGSIZE, PTE_R | PTE_W);
+
   // allocate and map a kernel stack for each process.
   proc_mapstacks(kpgtbl);
-  
+
   return kpgtbl;
 }
+
+
 
 // Initialize the kernel_pagetable, shared by all CPUs.
 void
@@ -142,22 +147,31 @@ walkaddr(pagetable_t pagetable, uint64 va)
 
 
 #if defined(LAB_PGTBL) || defined(SOL_MMAP) || defined(SOL_COW)
-void
-vmprint(pagetable_t pagetable) {
-  // your code here
-}
-#endif
 
+#endif
 
 
 // add a mapping to the kernel page table.
 // only used when booting.
 // does not flush TLB or enable paging.
+
 void
 kvmmap(pagetable_t kpgtbl, uint64 va, uint64 pa, uint64 sz, int perm)
 {
-  if(mappages(kpgtbl, va, sz, pa, perm) != 0)
-    panic("kvmmap");
+  while (sz >= SUPERPGSIZE &&
+         (va % SUPERPGSIZE) == 0 &&
+         (pa % SUPERPGSIZE) == 0) {
+    if (mappages_super(kpgtbl, va, pa, perm) != 0)
+      break;
+    va += SUPERPGSIZE;
+    pa += SUPERPGSIZE;
+    sz -= SUPERPGSIZE;
+  }
+
+  if (sz > 0) {
+    if (mappages(kpgtbl, va, sz, pa, perm) != 0)
+      panic("kvmmap small");
+  }
 }
 
 // Create PTEs for virtual addresses starting at va that refer to
@@ -193,6 +207,34 @@ mappages(pagetable_t pagetable, uint64 va, uint64 size, uint64 pa, int perm)
     a += PGSIZE;
     pa += PGSIZE;
   }
+  return 0;
+}
+// in kernel/vm.c (or same place as mappages)
+int
+mappages_super(pagetable_t pagetable, uint64 va, uint64 pa, int perm)
+{
+  if ((va & SUPERPGMASK) || (pa & SUPERPGMASK))
+    return -1;
+
+  pte_t *root_pte = &pagetable[PX(2, va)];
+
+  if ((*root_pte & PTE_V) == 0) {
+    char *mem = kalloc();
+    if (mem == 0)
+      return -1;
+    memset(mem, 0, PGSIZE);
+    *root_pte = PA2PTE((uint64)mem - KERNBASE) | PTE_V;
+  }
+
+  pagetable_t l1 = (pagetable_t)(PTE2PA(*root_pte) + KERNBASE);
+  pte_t *l1_pte = &l1[PX(1, va)];
+
+  if (*l1_pte & PTE_V)
+    return -1;
+
+  perm |= PTE_R;  // 👈 ensures valid leaf mapping
+  *l1_pte = PA2PTE(pa) | perm | PTE_V;
+
   return 0;
 }
 
@@ -241,6 +283,7 @@ uvmunmap(pagetable_t pagetable, uint64 va, uint64 npages, int do_free)
 
 // Allocate PTEs and physical memory to grow process from oldsz to
 // newsz, which need not be page aligned.  Returns new size or 0 on error.
+// in kernel/vm.c (or wherever uvmalloc is defined)
 uint64
 uvmalloc(pagetable_t pagetable, uint64 oldsz, uint64 newsz, int xperm)
 {
@@ -253,19 +296,43 @@ uvmalloc(pagetable_t pagetable, uint64 oldsz, uint64 newsz, int xperm)
 
   oldsz = PGROUNDUP(oldsz);
   for(a = oldsz; a < newsz; a += sz){
-    sz = PGSIZE;
-    mem = kalloc();
-    if(mem == 0){
-      uvmdealloc(pagetable, a, oldsz);
-      return 0;
-    }
+    if((a % SUPERPGSIZE) == 0 && (newsz - a) >= SUPERPGSIZE){
+      // allocate a superpage (2MB)
+      sz = SUPERPGSIZE;
+      mem = superalloc();           // returns a KVA for 2MB chunk
+      if(mem == 0){
+        uvmdealloc(pagetable, a, oldsz);
+        return 0;
+      }
+      // zero the whole superpage
+      memset(mem, 0, sz);
+
+      // convert KVA -> physical address (use KERNBASE if PADDR macro unavailable)
+      uint64 pa = (uint64)mem - KERNBASE;
+
+      // map as a 2MB leaf (use mappages_super)
+      if(mappages_super(pagetable, a, pa, PTE_R | PTE_U | xperm) != 0){
+        superfree(mem);
+        uvmdealloc(pagetable, a, oldsz);
+        return 0;
+      }
+    } else {
+      // normal 4KB page
+      sz = PGSIZE;
+      mem = kalloc();
+      if(mem == 0){
+        uvmdealloc(pagetable, a, oldsz);
+        return 0;
+      }
 #ifndef LAB_SYSCALL
-    memset(mem, 0, sz);
- #endif
-    if(mappages(pagetable, a, sz, (uint64)mem, PTE_R|PTE_U|xperm) != 0){
-      kfree(mem);
-      uvmdealloc(pagetable, a, oldsz);
-      return 0;
+      memset(mem, 0, sz);
+#endif
+      uint64 pa = (uint64)mem - KERNBASE;
+      if(mappages(pagetable, a, sz, pa, PTE_R | PTE_U | xperm) != 0){
+        kfree(mem);
+        uvmdealloc(pagetable, a, oldsz);
+        return 0;
+      }
     }
   }
   return newsz;
@@ -537,3 +604,31 @@ pgpte(pagetable_t pagetable, uint64 va) {
   return walk(pagetable, va, 0);
 }
 #endif
+
+// print a kernel page table (for pgtbltest)
+void
+vmprintwalk(pagetable_t pagetable, int depth)
+{
+  for (int i = 0; i < 512; i++) {
+    pte_t pte = pagetable[i];
+    if (pte & PTE_V) {
+      uint64 child = PTE2PA(pte);
+      // print indentation
+      for (int d = 0; d < depth; d++)
+        printf(" ..");
+      printf("0x%016lx: pte 0x%016lx pa 0x%016lx\n", 
+             (uint64)i << ((2 - depth) * 9 + 12), pte, child);
+      // recurse if not leaf
+      if ((pte & (PTE_R | PTE_X)) == 0) {
+        vmprintwalk((pagetable_t) (child + KERNBASE), depth + 1);
+      }
+    }
+  }
+}
+
+void
+vmprint(pagetable_t pagetable)
+{
+  printf("page table %p\n", pagetable);
+  vmprintwalk(pagetable, 0);
+}
