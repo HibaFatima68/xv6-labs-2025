@@ -18,6 +18,13 @@
 // PHYSTOP -- end RAM used by the kernel
 
 // qemu puts UART registers here in physical memory.
+//#ifndef SUPERPGSIZE
+//#define SUPERPGSIZE (2*1024*1024)
+//#endif
+   // 2 MiB
+#define SUPERPGSHIFT 21             // 2^21 == 2 MiB
+//#define SUPERPGMASK (SUPERPGSIZE-1)
+
 #define UART0 0x10000000L
 #define UART0_IRQ 10
 
