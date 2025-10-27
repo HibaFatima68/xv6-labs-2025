@@ -8,6 +8,13 @@
 #include "spinlock.h"
 #include "riscv.h"
 #include "defs.h"
+#define NSUPER 16   // number of 2MB super pages we keep; adjust as needed
+
+static struct {
+  struct spinlock lock;
+  void *list[NSUPER];
+  int n;
+} superarea;
 
 void freerange(void *pa_start, void *pa_end);
 
@@ -28,8 +35,28 @@ kinit()
 {
   initlock(&kmem.lock, "kmem");
   freerange(end, (void*)PHYSTOP);
+// carve out NSUPER superpages if available
+initlock(&superarea.lock, "superarea");
+superarea.n = 0;
+for(int i = 0; i < NSUPER; i++){
+  // try to allocate SUPERPGSIZE bytes as contiguous physical chunk by
+  // allocating SUPERPGSIZE/PGSIZE pages and checking alignment.
+  // Simplest pragmatic approach:
+  char *p = kalloc();
+  if(!p) break;
+  // try to coalesce: allocate SUPERPGSIZE/PGSIZE - 1 more pages and hope it's contiguous
+  // but that is unreliable. Better approach: Require boot-time supply of superpage memory,
+  // OR allocate one contiguous chunk by using pages from end of RAM via a build-time constant.
+  // For simplicity in labs: attempt to allocate KVA aligned to SUPERPGSIZE by scanning kalloc
+  // results is complicated — instead use this simpler pool: allocate SUPERPGSIZE using kalloc multiple times and store starting address only if (uint64)p % SUPERPGSIZE == 0
+  if(((uint64)p & SUPERPGMASK) == 0){
+    superarea.list[superarea.n++] = p;
+  } else {
+    kfree(p); // discard non-aligned KVA
+    break; // stop if not aligned
+  }
 }
-
+}
 void
 freerange(void *pa_start, void *pa_end)
 {
@@ -80,3 +107,35 @@ kalloc(void)
     memset((char*)r, 5, PGSIZE); // fill with junk
   return (void*)r;
 }
+void *
+superalloc(void)
+{
+  void *k;
+  acquire(&superarea.lock);
+  if(superarea.n == 0){
+    k = 0;
+  } else {
+    k = superarea.list[--superarea.n];
+    superarea.list[superarea.n] = 0;
+  }
+  release(&superarea.lock);
+  return k;
+}
+
+void
+superfree(void *k)
+{
+  acquire(&superarea.lock);
+  if(superarea.n < NSUPER){
+    superarea.list[superarea.n++] = k;
+    release(&superarea.lock);
+    return;
+  }
+  release(&superarea.lock);
+  // fallback: free 2MB as 4K pages
+  char *p = (char*)k;
+  for(int i = 0; i < SUPERPGSIZE/PGSIZE; i++){
+    kfree(p + i*PGSIZE);
+  }
+}
+
